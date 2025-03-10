@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.23;
 
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {ERC721Burnable} from "@openzeppelin/contracts/token/ERC721/extensions/ERC721Burnable.sol";
 import {ERC721Enumerable} from "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
@@ -8,13 +9,15 @@ import {ERC721URIStorage} from "@openzeppelin/contracts/token/ERC721/extensions/
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 contract LFGPlantGenesisNFT is
     ERC721,
     ERC721Enumerable,
     ERC721URIStorage,
     Ownable,
-    ERC721Burnable
+    ERC721Burnable,
+    ReentrancyGuard
 {
     using MessageHashUtils for bytes32;
 
@@ -28,7 +31,7 @@ contract LFGPlantGenesisNFT is
     string private URI;
 
     mapping(address => bool) public SignerValidState;
-    mapping(bytes32 => bool) public UserClaimProof;
+    mapping(bytes32 => mapping(bytes => bool)) public UserClaimProof;
 
     constructor(
         address _owner,
@@ -51,6 +54,8 @@ contract LFGPlantGenesisNFT is
         _;
     }
 
+    receive() external payable{}
+
     function setFee(uint64 newFee) external onlyOwner {
         fee = newFee;
     }
@@ -67,9 +72,11 @@ contract LFGPlantGenesisNFT is
         URI = _newURI;
     }
 
-    function claim(uint8 number) external payable Lock Limit{
+    function claim(uint8 number) external payable nonReentrant Lock Limit{
         uint256 totalFee = fee * number;
         require(msg.value >= totalFee, "Insufficient eth");
+        (bool success, ) = feeReceiver.call{value: totalFee}("");
+        require(success, "Fee receive fail");
         require(_batchMint(number, msg.sender) == ONEBYTES1, "Invalid mint");
     }
 
@@ -77,15 +84,27 @@ contract LFGPlantGenesisNFT is
         bytes32 claimNftData,
         bytes calldata sign,
         uint8 number
-    ) external Limit{
-        require(UserClaimProof[claimNftData] == false, "Already claim");
+    ) external nonReentrant Limit{
+        require(UserClaimProof[claimNftData][sign] == false, "Already claim");
         require(
             getSignatureVerify(packData(number, msg.sender), sign),
             "signature error"
         );
         //mint
-        UserClaimProof[claimNftData] = true;
+        UserClaimProof[claimNftData][sign] = true;
         require(_batchMint(number, msg.sender) == ONEBYTES1, "Invalid mint");
+    }
+
+    function skim(address token)external onlyOwner{
+        uint256 balance;
+        if(token == address(0)){
+            balance = address(this).balance;
+            (bool success, ) = feeReceiver.call{value: balance}("");
+            require(success, "Skim eth fail");
+        }else{
+            balance = IERC20(token).balanceOf(address(this));
+            IERC20(token).transfer(feeReceiver, balance);
+        }
     }
 
     function getSignatureVerify(

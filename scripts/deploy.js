@@ -46,17 +46,22 @@ async function main() {
   const mintFee = await LFGPlantGenesisNFT.fee();
   console.log("mintFee:", mintFee);
 
+  const ownerBeforeBalance = await provider.getBalance(manager.address);
+  console.log("ownerBeforeBalance:", ownerBeforeBalance);
+
+  const UserLFG = new ethers.Contract(LFGPlantGenesisNFTAddress, LFGPlantGenesisNFTABI.abi, testuser1);
+
   const mintAmount = 3;
   const totalFee = mintFee * 3n;
-  const claim = await LFGPlantGenesisNFT.claim(mintAmount, {value: totalFee});
+  const claim = await UserLFG.claim(mintAmount, {value: totalFee});
   const claimTx = await claim.wait();
   console.log("claim Tx:", claimTx.hash);
 
+  const ownerBeforeAfter = await provider.getBalance(manager.address);
+  console.log("ownerBeforeAfter:", ownerBeforeAfter);
+
   const tokenURI = await LFGPlantGenesisNFT.tokenURI(0n);
   console.log("tokenURI:", tokenURI);
-
-  const ManagerLFG = new ethers.Contract(LFGPlantGenesisNFTAddress, LFGPlantGenesisNFTABI.abi, manager);
-  const UserLFG = new ethers.Contract(LFGPlantGenesisNFTAddress, LFGPlantGenesisNFTABI.abi, testuser1);
 
   const whitelistAmount = 5;
 
