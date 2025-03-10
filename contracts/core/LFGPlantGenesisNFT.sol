@@ -22,27 +22,32 @@ contract LFGPlantGenesisNFT is
 
     bytes1 private immutable ONEBYTES1 = 0x01;
     uint8 private lockState;
-    uint16 private immutable _totalSupply = 10000;
-    uint64 private fee = 0.01 ether;
-    address private feeReceiver;
+    uint16 private immutable limitSupply = 10000;
+    uint64 public fee;
+    address public feeReceiver;
     string private URI;
 
-    mapping(address => bool) public Signer;
+    mapping(address => bool) public SignerValidState;
     mapping(bytes32 => bool) public UserClaimProof;
-    mapping(address => mapping(uint8 => bool)) public WhitelistMintState;
-    // mapping(address => )
 
     constructor(
-        address initialOwner,
+        address _owner,
         address _feeReceiver,
-        address _signer
-    ) ERC721("LFG Plant Genesis Collection", "LPG") Ownable(initialOwner) {
+        address _signer,
+        uint64 _fee
+    ) ERC721("LFG Plant Genesis Collection", "LPG") Ownable(_owner) {
         feeReceiver = _feeReceiver;
-        Signer[_signer] = true;
+        SignerValidState[_signer] = true;
+        fee = _fee;
     }
 
-    modifier Lock() {
+    modifier Lock{
         require(lockState == 0, "Locked");
+        _;
+    }
+
+    modifier Limit{
+        require(id <= limitSupply, "Overflow");
         _;
     }
 
@@ -55,14 +60,14 @@ contract LFGPlantGenesisNFT is
     }
 
     function setSigner(address signer, bool state) external onlyOwner {
-        Signer[signer] = state;
+        SignerValidState[signer] = state;
     }
 
     function setURI(string memory _newURI) external onlyOwner {
         URI = _newURI;
     }
 
-    function claim(uint8 number) external payable Lock {
+    function claim(uint8 number) external payable Lock Limit{
         uint256 totalFee = fee * number;
         require(msg.value >= totalFee, "Insufficient eth");
         require(_batchMint(number, msg.sender) == ONEBYTES1, "Invalid mint");
@@ -72,36 +77,33 @@ contract LFGPlantGenesisNFT is
         bytes32 claimNftData,
         bytes calldata sign,
         uint8 number
-    ) external {
+    ) external Limit{
         require(UserClaimProof[claimNftData] == false, "Already claim");
         require(
-            getSignatureVerify(number, packData(number, msg.sender), sign),
+            getSignatureVerify(packData(number, msg.sender), sign),
             "signature error"
         );
-        require(_batchMint(number, msg.sender) == ONEBYTES1, "Invalid mint");
         //mint
-        WhitelistMintState[msg.sender][number] = false;
         UserClaimProof[claimNftData] = true;
+        require(_batchMint(number, msg.sender) == ONEBYTES1, "Invalid mint");
     }
 
     function getSignatureVerify(
-        uint8 _number,
         bytes32 _signHash,
         bytes calldata _signature
     ) public view returns (bool state) {
-        state = WhitelistMintState[
+        state = SignerValidState[
             ECDSA.recover(
                 MessageHashUtils.toEthSignedMessageHash(_signHash),
                 _signature
             )
-        ][_number];
+        ];
     }
 
     function getEncodeData(
-        uint8 number,
-        address user
+        uint8 number
     ) external view returns (bytes32) {
-        return packData(number, user);
+        return packData(number, msg.sender);
     }
 
     function packData(
@@ -111,15 +113,6 @@ contract LFGPlantGenesisNFT is
         _packData = keccak256(
             abi.encode(address(this), block.chainid, user, number)
         );
-    }
-
-    function totalSupply()
-        public
-        view
-        override(ERC721Enumerable)
-        returns (uint256)
-    {
-        return _totalSupply;
     }
 
     function _batchMint(uint8 number, address receiver) private returns (bytes1 state) {
